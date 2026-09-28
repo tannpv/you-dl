@@ -1,0 +1,1 @@
+"""You-DL desktop application."""

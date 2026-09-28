@@ -1,0 +1,57 @@
+name: Desktop installers
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feature/**', develop, main]
+permissions:
+  contents: read
+jobs:
+  build:
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install media tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install media tools (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg innosetup -y --no-progress
+      - name: Add installer compiler to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+      - name: Use real FFmpeg binaries rather than Chocolatey shims
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = Get-ChildItem "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (-not $binary) { throw "FFmpeg binary not found" }
+          $binary.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: uv run -m scripts.build
+      - run: uv run -m scripts.verify_package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: You-DL-${{ runner.os }}-${{ runner.arch }}
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*Setup.exe
+            dist/*.json
+            dist/*.sha256
